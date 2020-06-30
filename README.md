@@ -11,10 +11,10 @@ List of models or aspects of the project currently being worked on
 List of models or aspects of the project intended for future work. Not necessarily ordered
 
 ## DataManipDFL.rmd
-Read in data for stream gages, calculate and extract relevant variables, export to files in data folder
+Read in data for stream gages, calculate and extract relevant variables, export to files in data folder. Discusses choice of variables calculated
 
 ## DataManipPRCP.rmd 
-Read in data for weather stations, calculate and extract relevant variables, export files to data folder
+Read in data for weather stations, calculate and extract relevant variables, export files to data folder. Discussed choice of variables calculated
 
 ## NormMeanMod.rmd
 Fit models with unbounded normal data model. Including simple mean/var and both time and gage based random affects. Discusses the theoretical issues with this approach and lack of support from the data
