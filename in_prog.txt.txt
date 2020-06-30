@@ -1,0 +1,14 @@
+# List of active streamflow projects
+
+## Precip based linear mixed models
+	-using precip data associated with stream gages via spatial join
+	-linear mixed models of streamflow variablity 
+	-on hold due to lack of data support for random affects models
+
+## Non hierarchal models based on single stream gage
+	-reduce scale to attempt to better understand process model
+	-will eliminate issues with vast differences between gages
+
+## models using a gamma data model
+	-all the benefits of a truncated normal (well most of them) maybe with less issues?
+	
