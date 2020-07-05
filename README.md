@@ -17,16 +17,16 @@ Read in data for stream gages, calculate and extract relevant variables, export 
 Read in data for weather stations, calculate and extract relevant variables, export files to data folder. Discussed choice of variables calculated
 
 ## NormMeanMod.rmd
-Fit models with unbounded normal data model. Including simple mean/var and both time and gage based random affects. Discusses the theoretical issues with this approach and lack of support from the data
+Fit models with unbounded normal data model. Discusses the theoretical issues with this approach and lack of support from the data
 
 ## TruncNormMeanMod.rmd 
-Fit models with truncated normal data model. Including simple mean/var and both time and gagge based random affects. Discusses the lack of support in the data for this approach
+Fit models with truncated normal data model. Discusses the lack of support in the data for this approach
 
 ## NormMeanSim.rmd
-Simulated data from unbounded normal data model to test specification of model in general.
+Simulated data from unbounded normal data model to test specification of model in general. Includes random and mixed effect models.
 
 ## TruncNormMeanSim.rmd
-Simulated data from truncated normal data model to test specification of model in general.
+Simulated data from truncated normal data model to test specification of model in general. Includes random and mixed effect models. 
 
 ## data
 Folder with most necessary files and shp_links.txt file containing links to where shapefiles may be downloaded from due to github storage limits
