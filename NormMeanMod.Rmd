@@ -1,0 +1,160 @@
+---
+title: "Simple Mean based Normal Data Models"
+author: "Matt Thacker"
+date: "7/2/2020"
+output: html_document
+---
+
+
+When developing complex and potentially multilevel/hierarchal models it is useful to begin with a simple model and gradually add complexity. To that end, I have begun by fitting a simple normal data model with a normal prior on the mean and inverse gamma prior on the variance.
+
+$$\delta_{fl} \sim N(\mu, \tau)$$
+
+$$\mu \sim N(\mu_{0}, \tau_{0})$$
+$$\tau \sim IG(\alpha, \beta)$$
+
+
+First, lets read in the relevant data
+
+```{r}
+#read in table
+dfl.mmack <- read.table("Gen_Data/calced_vars/dfl_mmack.txt")
+#remove x's caused by numerical column names
+colnames(dfl.mmack) <- sub("X","",colnames(dfl.mmack))
+
+years <- colnames(dfl.mmack)
+ids <- rownames(dfl.mmack)
+```
+
+
+Lets fit a null model with just the mean and variance using $\delta_{fl}$ as the response variable and a normal data model
+
+```{r}
+library(rjags)
+library(coda)
+
+#model specification
+dflMeanVar <- "
+model {
+  mu ~ dnorm(mu0,Tau) # prior on the mean 
+  prec ~ dgamma(s1,s2) #uniformative prior on variance
+
+  for(i in 1:Nrep){
+    for(t in 1:Nyear){
+      Y[i,t] ~ dnorm(mu,prec) # data model
+    }
+  }
+}
+"
+##priors and data
+data<- list(Y = dfl.mmack, mu0 = 50, Tau = 1/1000, s1 = .001, s2 = .001, Nyear = length(years), Nrep = length(ids)) 
+
+#initial conditions, global mean dfl plus shocks
+inits<- list()
+inits[[1]]<- list(mu= mean(apply(dfl.mmack, 2, mean)))
+inits[[2]]<- list(mu=mean(apply(dfl.mmack, 2, mean))-5)
+inits[[3]]<- list(mu=mean(apply(dfl.mmack, 2, mean))+5)
+
+#fit model
+j.model   <- jags.model (file = textConnection(dflMeanVar),
+                             data = data,
+                             inits = inits,
+                             n.chains = 3)
+jags.out   <- coda.samples (model = j.model,
+                            variable.names = c("mu", "prec"),
+                                n.iter = 50000)
+
+#burn
+burnin<- 500
+jags.burn<- window(jags.out, start = burnin)
+
+#examine
+gelman.diag(jags.burn)
+summary(jags.burn)
+effectiveSize(jags.burn)
+```
+
+
+Lets try looking at seasonal dfl, likely to be a bit nicer to work with as it has less noise than the monthly.
+
+```{r}
+dfl.season <- read.table("Gen_Data/calced_vars/dfl_season_mmack.txt")
+
+##priors and data
+data<- list(Y = dfl.season, mu0 = 50, Tau = 1/1000, s1 = .001, s2 = .001, Nyear = length(years), Nrep = length(ids)) 
+
+#initial conditions, global mean dfl plus shocks
+inits<- list()
+inits[[1]]<- list(mu= mean(apply(dfl.season, 2, mean)))
+inits[[2]]<- list(mu=mean(apply(dfl.season, 2, mean))-10)
+inits[[3]]<- list(mu=mean(apply(dfl.season, 2, mean))+10)
+
+#fit model
+j.model   <- jags.model (file = textConnection(dflMeanVar),
+                             data = data,
+                             inits = inits,
+                             n.chains = 3)
+jags.out   <- coda.samples (model = j.model,
+                            variable.names = c("mu", "prec"),
+                                n.iter = 50000)
+
+#burn
+burnin<- 500
+jags.burn<- window(jags.out, start = burnin)
+
+#examine
+#plot(jags.burn)
+gelman.diag(jags.burn)
+summary(jags.burn)
+```
+
+
+
+Generally speaking, seasonal dfl is much nicer than monthly. Lets look at some 95% predictive and credible intervals for the model
+
+```{r}
+##predictive and credible intervals
+#initial values
+MV.mat <- as.matrix(jags.burn)
+
+#number of samples to take
+nsamp <- 10000
+#indexes of samples taken from seq 1:nrow
+samp <- sample.int(nrow(MV.mat),nsamp)
+
+#initialize data storage
+npred <- ncol(dfl.season)         
+ycred <- matrix(NA,nrow=nsamp,ncol=npred)
+ypred <- matrix(NA,nrow=nsamp,ncol=npred)
+
+#calculate interval values
+for(g in 1:nsamp){   #loop through and fill each row
+  theta = MV.mat[samp[g],]    #sampled parameters
+
+  ycred[g,] <- rep(theta["mu"], npred) 
+  ypred[g,] <- rnorm(npred,ycred[g,],1/sqrt(theta["prec"]))
+
+}
+
+ci.MV <- apply(ycred,2,quantile,c(0.025,0.5,0.975))  ## credible interval and median
+pi.MV <- apply(ypred,2,quantile,c(0.025,0.975))        ## prediction interval
+
+#plot it
+for (i in 1:nrow(dfl.season)){
+  if (i == 1){
+    plot(years, dfl.season[i,], ylab = "Seasonal Variability", xlab = "year", ylim = c(-20,200)) #yaxis is ignoring a few outliers which are huge due to near zero flow recorded in some months
+  } else {
+    points(years, dfl.season[i,])
+  }
+  
+}
+lines(years, ci.MV[2,], col = 1, lwd =2)
+lines(years, ci.MV[1,], col = 2, lwd =2, lty = 2)
+lines(years, ci.MV[3,], col = 2, lwd =2, lty = 2)
+lines(years, pi.MV[1,], col = 4, lwd =2, lty = 4)
+lines(years, pi.MV[2,], col = 4, lwd =2, lty = 4)
+legend("top", legend = c("Mean model", "95% CI", "95% PI"), col = c(1,2,4), lty = c(1,2,4), cex = .5)
+
+```
+
+I've definitely seen worse, however, notice how our predictive interval easily includes negative values? this is an issue as our modeled variable is the ratio of two positive numbers and is thus constrained to be positive as well. This indicates that future work should be performed with a strictly postive distribution such as a truncated normal, lognormal, cauchy, or gamma. 
