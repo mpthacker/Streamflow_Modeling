@@ -23,10 +23,10 @@ Fit models with unbounded normal data model. Discusses the theoretical issues wi
 Fit models with truncated normal data model. Discusses the lack of support in the data for this approach
 
 ## NormMeanSim.rmd
-Simulated data from unbounded normal data model to test specification of model in general. Includes random and mixed effect models.
+Simulated data from unbounded normal data model to test specification of model in general. 
 
 ## TruncNormMeanSim.rmd
-Simulated data from truncated normal data model to test specification of model in general. Includes random and mixed effect models. 
+Simulated data from truncated normal data model to test specification of model in general. 
 
 ## data
 Folder with most necessary files and shp_links.txt file containing links to where shapefiles may be downloaded from due to github storage limits
