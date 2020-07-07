@@ -22,5 +22,5 @@ Fit models with unbounded normal data model. Discusses the theoretical issues wi
 ## TruncNormMeanMod.rmd 
 Fit models with truncated normal data model. More appropriate for a strictly postive variable of interest
 
-## data
+## Gen_Data
 Folder with most necessary files and shp_links.txt file containing links to where shapefiles may be downloaded from due to github storage limits
