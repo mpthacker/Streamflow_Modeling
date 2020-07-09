@@ -1,0 +1,347 @@
+---
+title: "Simple Mean based Trunc Normal Data Models"
+author: "Matt Thacker"
+date: "7/2/2020"
+output: html_document
+---
+
+First, lets read in the relevant data
+
+```{r}
+#read in table
+dfl.season <- read.table("Gen_Data/calced_vars/dfl_season_mmack.txt")
+#remove x's caused by numerical column names
+colnames(dfl.season) <- sub("X","",colnames(dfl.season))
+
+years <- colnames(dfl.season)
+ids <- rownames(dfl.season)
+```
+
+Lets fit a null model with just the mean and using seasonal $\delta_{fl}$ as the response variable and a truncated normal data model
+
+```{r}
+library(rjags)
+library(coda)
+
+#model specification
+dflMeanVar.trunc <- "
+model {
+  mu ~ dnorm(mu0,Tau) T(0,)# prior on the mean 
+  prec ~ dgamma(s1,s2) #uniformative prior on variance
+
+  for(i in 1:Nrep){
+    for(t in 1:Nyear){
+      Y[i,t] ~ dnorm(mu,prec) T(0,)# data model
+    }
+  }
+}
+"
+##priors and data
+data <- list(Y = dfl.season, mu0 = 50, Tau = 1/1000, s1 = .001, s2 = .001, Nyear = length(years), Nrep = length(ids)) 
+
+#initial conditions, global mean dfl plus shocks
+inits <- list()
+inits[[1]]<- list(mu= mean(apply(dfl.season, 2, mean)))
+inits[[2]]<- list(mu=mean(apply(dfl.season, 2, mean))-5)
+inits[[3]]<- list(mu=mean(apply(dfl.season, 2, mean))+5)
+
+#fit model
+mean.model   <- jags.model (file = textConnection(dflMeanVar.trunc),
+                             data = data,
+                             inits = inits,
+                             n.chains = 3)
+mean.out   <- coda.samples (model = mean.model,
+                            variable.names = c("mu", "prec"),
+                                n.iter = 50000)
+
+#burn
+burnin<- 500
+mean.burn<- window(mean.out, start = burnin)
+
+#examine
+plot(mean.burn)
+gelman.diag(mean.burn)
+summary(mean.burn)
+effectiveSize(mean.burn)
+mean.dic <- dic.samples(mean.model, n.iter = 5000)
+```
+
+lets look at some intervals
+```{r}
+library(truncnorm)
+##predictive and credible intervals
+#initial values
+MV.mat <- as.matrix(mean.burn)
+
+#number of samples to take
+nsamp <- 10000
+#indexes of samples taken from seq 1:nrow
+samp <- sample.int(nrow(MV.mat),nsamp)
+
+#initialize data storage
+npred <- ncol(dfl.season)         
+ycred <- matrix(NA,nrow=nsamp,ncol=npred)
+ypred <- matrix(NA,nrow=nsamp,ncol=npred)
+
+#calculate interval values
+for(g in 1:nsamp){   #loop through and fill each row
+  theta = MV.mat[samp[g],]    #sampled parameters
+
+  ycred[g,] <- rep(theta["mu"], npred) 
+  ypred[g,] <- rtruncnorm(npred,a = 0, b = Inf,ycred[g,],1/sqrt(theta["prec"]))
+
+}
+
+ci.MV <- apply(ycred,2,quantile,c(0.025,0.5,0.975))  ## credible interval and median
+pi.MV <- apply(ypred,2,quantile,c(0.025,0.975))        ## prediction interval
+
+#plot it
+for (i in 1:nrow(dfl.season)){
+  if (i == 1){
+    plot(years, dfl.season[i,], ylab = "Seasonal Variability", xlab = "year", ylim = c(-50,50)) #yaxis is ignoring a few outliers which are huge due to near zero flow recorded in some months
+  } else {
+    points(years, dfl.season[i,])
+  }
+  
+}
+lines(years, ci.MV[2,], col = 1, lwd =2)
+lines(years, ci.MV[1,], col = 2, lwd =2, lty = 2)
+lines(years, ci.MV[3,], col = 2, lwd =2, lty = 2)
+lines(years, pi.MV[1,], col = 4, lwd =2, lty = 4)
+lines(years, pi.MV[2,], col = 4, lwd =2, lty = 4)
+legend("top", legend = c("Mean model", "95% CI", "95% PI"), col = c(1,2,4), lty = c(1,2,4), cex = .5)
+
+```
+
+Here we can see our interval estimates are similar to the pure normal data model with the exception that impossible negative estimates are now excluded. 
+
+Lets see if we can improve upon our model by adding some random effects based on gage or time.
+
+Starting with time based random effects
+```{r}
+library(ggmcmc)
+
+#model
+dflRET.trunc <- "
+model {
+  ##priors
+  mu ~ dnorm(mu0,Tau) T(0,) # prior on the mean 
+  prec ~ dgamma(s1,s2) #uniformative prior on variance
+  tau.t ~ dgamma(s3,s4) #hyperprior for random affects
+  for (t in 1:Nyear){
+    alpha.t[t] ~ dnorm(0,tau.t)  T(-mu,)   # random year effect
+  }
+
+#residual error variance
+sigma2e<- 1/prec
+
+#random effects variance
+sigma2g<- 1/tau.t
+
+VPC <- sigma2g/(sigma2g+sigma2e)
+
+  for(t in 1:Nyear){
+    Ex[t] <- mu +alpha.t[t]    ## process model (does not vary with rep i)
+    
+    
+    for(i in 1:Nrep){
+      Y[i,t] ~ dnorm(Ex[t],prec) T(0,) ## data model
+    }
+  }
+}
+"
+
+##data and priors
+data.RE <- list(Y = dfl.season, mu0 = 50, Tau = 1/1000, s1 = .001, s2 = .001, s3 = .001, s4 = .001, Nyear = length(years), Nrep = length(ids))
+
+#fit model
+RET.model   <- jags.model (file = textConnection(dflRET.trunc),
+                             data = data.RE,
+                             inits = inits,
+                             n.chains = 3)
+RET.out   <- coda.samples (model = RET.model,
+                            variable.names = c("mu", "prec", "alpha.t", "VPC"),
+                                n.iter = 500000, thin = 2)
+
+#burn
+burnin<- 200000
+RET.burn<- window(RET.out, start = burnin)
+
+#examine
+gelman.diag(RET.burn)
+summary(RET.burn)
+effectiveSize(RET.burn)
+RET.dic <- dic.samples(RET.model, n.iter = 5000)
+
+#plotting
+RET.ggs <- ggs(RET.burn)
+ggmcmc(jags.ggs, plot = c("density", "traceplot", "running", "crosscorrelation"), "autocorrelation")
+
+```
+
+
+now lets fit solo gage effects
+
+```{r}
+#model
+dflREG.trunc <- "
+model {
+  ##priors
+  mu ~ dnorm(mu0,Tau) T(0,) # prior on the mean 
+  prec ~ dgamma(s1,s2) #uniformative prior on variance
+  tau.g ~ dgamma(s3,s4) #hyperprior for random affects
+  for (g in 1:Nrep){
+    alpha.g[g] ~ dnorm(0,tau.g) T(-mu,)     # random year effect
+  }
+
+#residual error variance
+sigma2e<- 1/prec
+
+#random effects variance
+sigma2g<- 1/tau.g
+
+VPC <- sigma2g/(sigma2g+sigma2e)
+
+  for(g in 1:Nrep){
+    Ex[g] <- mu + alpha.g[g]     ## process model (does not vary with rep i)
+    
+    for(t in 1:Nyear){
+      Y[g,t] ~ dnorm(Ex[g],prec) T(0,) ## data model
+    }
+  }
+}
+"
+
+#fit model
+REG.model   <- jags.model (file = textConnection(dflREG.trunc),
+                             data = data.RE,
+                             inits = inits,
+                             n.chains = 3)
+REG.out   <- coda.samples (model = REG.model,
+                            variable.names = c("mu", "prec", "alpha.g", "VPC"),
+                                n.iter = 500000, thin = 2)
+
+#burn
+burnin<- 200000
+REG.burn<- window(REG.out, start = burnin)
+
+#examine
+gelman.diag(REG.burn)
+summary(REG.burn)
+effectiveSize(REG.burn)
+REG.dic <- dic.samples(REG.model, n.iter = 5000)
+```
+
+gage effects dont seem to be that significant
+
+
+DIC clearly indicates that the best random effects model is time based. The posterior variance partition coefficients also support this hypothesis, as very little additional variance is explained by the addition of gage based effects compared to the null model. This supports further implementation of time based drivers ie: climate vars in process models. Ideally, I would look at a model including both gage and time based effects however I haven't yet figured out a way in JAGS to constrain the random effects and mean such that Ex[g,t]>0 aside from censoring Ex[g,t] a posterori which is not equivalent in the case of a hierarchal model such as we have. 
+
+Lets look as posterior intervals for the time based random effects model.
+
+```{r}
+#predictive and credible intervals
+#initial values
+#isolate mu to sample from
+RET.mat <- as.matrix(RET.burn)
+alpha.RET <- RET.mat[,grep("alpha",colnames(RET.mat))]
+
+#number of samples to take
+nsamp <- 10000
+#indexes of samples taken from seq 1:nrow
+samp <- sample.int(nrow(RET.mat),nsamp)
+
+#initialize data storage
+npred <- ncol(dfl.season)         
+ycred <- matrix(NA,nrow=nsamp,ncol=npred)
+ypred <- matrix(NA,nrow=nsamp,ncol=npred)
+
+
+#calculate interval values
+for(i in seq_len(nsamp)){   #loop through and fill each row
+  theta <- RET.mat[samp[i],]    #sampled parameters (mean and var)
+  alpha <- alpha.RET[samp[i],]  #sampled alphas
+  
+  for (j in 1:ncol(dfl.season)){
+    ycred[i,j] <- theta["mu"] + alpha[j]
+    ypred[i,j] <- rtruncnorm(1, a = 0, b = Inf, mean = ycred[i,j], sd = 1/sqrt(theta["prec"]))
+  }
+}
+
+ci.MV <- apply(ycred,2,quantile,c(0.025,0.5,0.975))  ## credible interval and median
+pi.MV <- apply(ypred,2,quantile,c(0.025,0.975))        ## prediction interval
+
+gage.nums <- 1:length(ids)
+#plot it
+for (i in 1:npred){
+  if (i == 1){
+    plot(years, dfl.season[i,], ylab = "Seasonal Variability", xlab = "gage", ylim = c(-20,50))
+  } else {
+    points(years, dfl.season[i,])
+  }
+  
+}
+lines(years, ci.MV[2,], col = 1, lwd =2)
+lines(years, ci.MV[1,], col = 2, lwd =2, lty = 2)
+lines(years, ci.MV[3,], col = 2, lwd =2, lty = 2)
+lines(years, pi.MV[1,], col = 4, lwd =2, lty = 4)
+lines(years, pi.MV[2,], col = 4, lwd =2, lty = 4)
+
+
+```
+
+And random gage effects
+
+```{r}
+#predictive and credible intervals
+#initial values
+#isolate mu to sample from
+REG.mat <- as.matrix(REG.burn)
+alpha.REG <- REG.mat[,grep("alpha",colnames(REG.mat))]
+
+#number of samples to take
+nsamp <- 10000
+#indexes of samples taken from seq 1:nrow
+samp <- sample.int(nrow(REG.mat),nsamp)
+
+#initialize data storage
+npred <- nrow(dfl.season)         
+ycred <- matrix(NA,nrow=nsamp,ncol=npred)
+ypred <- matrix(NA,nrow=nsamp,ncol=npred)
+
+
+#calculate interval values
+for(i in seq_len(nsamp)){   #loop through and fill each row
+  theta <- REG.mat[samp[i],]    #sampled parameters (mean and var)
+  alpha <- alpha.REG[samp[i],]  #sampled alphas
+  
+  for (j in 1:npred){
+    ycred[i,j] <- theta["mu"] + alpha[j]
+    ypred[i,j] <- rtruncnorm(1, a = 0, b = Inf, mean = ycred[i,j], sd = 1/sqrt(theta["prec"]))
+  }
+}
+
+ci.MV <- apply(ycred,2,quantile,c(0.025,0.5,0.975))  ## credible interval and median
+pi.MV <- apply(ypred,2,quantile,c(0.025,0.975))        ## prediction interval
+
+gage.nums <- 1:length(ids)
+#plot it
+for (i in 1:ncol(dfl.season)){
+  if (i == 1){
+    plot(gage.nums, dfl.season[,i], ylab = "Seasonal Variability", xlab = "gage", ylim = c(-20,50))
+  } else {
+    points(gage.nums, dfl.season[,i])
+  }
+  
+}
+lines(gage.nums, ci.MV[2,], col = 1, lwd =2)
+lines(gage.nums, ci.MV[1,], col = 2, lwd =2, lty = 2)
+lines(gage.nums, ci.MV[3,], col = 2, lwd =2, lty = 2)
+lines(gage.nums, pi.MV[1,], col = 4, lwd =2, lty = 4)
+lines(gage.nums, pi.MV[2,], col = 4, lwd =2, lty = 4)
+
+
+```
+
+
+Interval estimates strongly support the DIC based choice of time based random effects rather than gage based.
