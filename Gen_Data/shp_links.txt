@@ -1,0 +1,10 @@
+Shapefiles used in analysis:
+
+##USGS GagesII dataset:
+-https://www.sciencebase.gov/catalog/item/59692a64e4b0d1f9f05fbd39
+
+
+##USGS National Hydrography Dataset Watershed Boundaries
+-https://www.usgs.gov/core-science-systems/ngp/national-hydrography/watershed-boundary-dataset?qt-science_support_page_related_con=4#qt-science_support_page_related_con
+
+
