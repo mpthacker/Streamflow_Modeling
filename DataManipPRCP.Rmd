@@ -1,0 +1,300 @@
+---
+title: "NOAA Station Data Manipulation"
+author: "Matt Thacker"
+date: "7/1/2020"
+output: html_document
+---
+
+
+lets start by reading in our station data
+
+```{r}
+#date manipulation
+library (lubridate)
+library(tidyverse)
+
+#spatial stuff
+library(raster)
+
+##read in gage files
+gages.mmack <- shapefile("Gen_Data/Merrimack_Basin/gagesII_mmack_singlepart.shp")
+#subset only gages with complete record from study area
+gages.comp <- gages.mmack[which(gages.mmack@data$ACTIVE09 == "yes" & gages.mmack@data$FLYRS1990 == 20),]
+
+##watershed boundary layer
+wbd_hu6 <- shapefile("Gen_Data/WBD_01_HU2_Shape/WBDHU6.shp")
+
+#convert watershed boundary dataset from geographic coords. to proj. coords shared with gagesII
+wbd_hu6<- spTransform(wbd_hu6, crs(gages.mmack))
+
+#clip watershed boundary dataset to just merrimack
+wbd.mmack <- wbd_hu6[which(wbd_hu6@data$Name == "Merrimack"),]
+
+##read in precipitation data
+#list of filenames for precip data
+precips.files <- list.files("Gen_Data/NOAA_Stations")
+
+
+#loop to read individual year block files and merge them all into a single data frame because NOAA ams is a jerk and I can't download them all at once.
+precips.daily <- data.frame()
+for (i in 1:length(precips.files)){
+  #read csv to temporary object
+  temp <- read.csv(paste("Gen_Data/NOAA_Stations/", precips.files[[i]], sep = ""))
+  
+  #append object to data frame
+  precips.daily <- rbind(precips.daily, temp)
+  
+}
+
+#parse dates into separate year, month, and day columns 
+precips.daily <- precips.daily %>% mutate(
+      across(DATE, list("Year" = year, "Month" = month, "Day" = day)))
+
+
+#filter out the 1990s to get more available observations 
+precips.daily <- precips.daily %>% filter(!grepl("199", DATE_Year))
+
+#Set number of years in consideration
+years <- unique(precips.daily$DATE_Year)
+Nyear <- length(years)
+```
+
+Now lets calculate monthly precipitation totals at each station and some variables associated with that. $\Delta_{prcp}$ is the maximum monthly flow minus the minimum monthly flow. $Max_{month}$ is the maximum monthly flow total. $Min_{month}$ is the minimum monthly flow total. 
+
+```{r}
+#list manipulation
+library(rlist)
+
+##seperate out stations into individual data frames
+#unique station IDs
+weather.ids <- unique(precips.daily$STATION)
+
+#function to separate each station from others
+weatherSEP <- function (x){
+  out <- data.frame(precips.daily[which(precips.daily$STATION == weather.ids[x]),])
+  return(out)
+}
+
+#itterator vector
+itt.weather <- 1:length(weather.ids)
+
+#actually separate stations apart
+stations.weather <- lapply(itt.weather, weatherSEP)
+
+
+##calculate monthly average precipitation for year for each station and variables derived from that
+
+#produces matrix for each year and month with T indicating >= 25obs in given month from given station table
+fulldata.tf <- function (x){   
+  
+  #initialize storage for output
+  out <- data.frame()
+  
+  #loop over years
+  for (i in 1:Nyear){ 
+    
+    #separate out measurements for given year
+    Y <- x[which(x[,"DATE_Year"] == years[i]),]
+    
+    #loop over months
+    for (j in 1:12){  
+      
+     #separate out measurements from given month
+     M <- Y[which(Y[,"DATE_Month"] == j),]
+     
+     #check nOBS in given month and write to output matrix
+     if (nrow(M) >= 25){
+       out[i,j] <- T
+     } else {
+       out[i,j] <- F
+     }
+    }
+  }
+  
+  #rename variables
+  colnames(out) <- c("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+  rownames(out) <- years
+  
+  return(out)
+}
+
+#check each station to see which years have full records
+Tdata.rec <- lapply(stations.weather, fulldata.tf)
+
+#create logical vector for each station indicating whether there is full data for the study period. x is output from fulldata.tf
+fulldata.index <- function(x){  
+  #filter out all rows w/ less than 12 'full' months
+  x <- x %>% filter(rowSums(x)==12)
+  
+  #return T if all years full, else F
+  if (nrow(x) >= 10){
+    return(T)
+  } else {
+    return(F)
+  }
+}
+
+#identify indexes of stations with full data record
+fulldata.log <- lapply(Tdata.rec, fulldata.index)
+fulldata.vec <- which(fulldata.log == T)
+
+#identify stations themselves
+fulldata.ids <- weather.ids[fulldata.vec]
+stations.fulldata<- stations.weather[fulldata.vec]
+
+
+##apply through stations with full data record to calculate MaxMonth/MinMonth for each year. End up with matrix of staion X year
+
+stations.fun <- function(x){  
+  
+  #initialize storage for output
+  Dprcp<- rep(NA,length(years))
+  Max <- rep(NA, length(years))
+  Min <- rep(NA, length(years))
+  Msums<- rep(NA, 12)
+  
+  #loop over years
+  for (i in 1:length(years)){
+    #separate out measurements from a given year
+    Y <- x[which(x[,"DATE_Year"] == years[i]),]
+    
+    #loop over months
+    for (j in 1:12){
+      
+      #separate out measurements from given month
+      M <- Y[which(Y[,"DATE_Month"] == j),]
+      
+      #total precip in that month
+      Msums[j] <- sum(M$PRCP, na.rm = T)
+      
+      if (j == 12){
+        Max[i] <- max(Msums)
+        Min[i] <- min(Msums)
+        Dprcp[i] <- max(Msums)-min(Msums)
+      }
+     
+    }
+    
+  }
+  
+  #output
+  out <- list(Dprcp,Max,Min)
+  names(out) <- c("Dprcp", "PRCPmax", "PRCPmin")
+  
+  return(out)
+  
+}
+
+Dprcp.lst<- lapply(stations.fulldata, stations.fun)
+
+
+##organize outputs
+#pull dprcp vals
+Dprcp.extract <- function(x){
+  x$Dprcp 
+}
+
+Dprcp <- list.rbind(lapply(Dprcp.lst, Dprcp.extract))
+colnames(Dprcp) <- years
+rownames(Dprcp) <- fulldata.ids
+
+#pull max vals
+Max.extract <- function(x){
+  x$PRCPmax 
+}
+
+PRCPmax <- list.rbind(lapply(Dprcp.lst, Max.extract))
+colnames(PRCPmax) <- years
+rownames(PRCPmax) <- fulldata.ids
+
+#pull min vals
+Min.extract <- function(x){
+  x$PRCPmin 
+}
+
+PRCPmin <- list.rbind(lapply(Dprcp.lst, Min.extract))
+colnames(PRCPmin) <- years
+rownames(PRCPmin) <- fulldata.ids
+
+
+
+```
+
+Now lets perform a spatial join to associate precip with out DFL variables (still needs to be finished)
+```{r}
+#for thiessen polygons
+library(dismo)
+
+#for spatial joins
+library(sf)
+
+##create spatial points database to hold station data
+#extract coordinates for weather stations
+coords.extract<- function(x){
+  return(x[1,c("LONGITUDE", "LATITUDE")])
+}
+coords.lst<- lapply(stations.fulldata, coords.extract)
+coords <- list.rbind(coords.lst)
+
+##spatial points data frame, need to assemble data table. Geographic coords. system
+#Dprcp
+Dprcp.points.fd<- SpatialPointsDataFrame(coords = coords, data = data.frame(Dprcp), proj4string  = crs("+proj=longlat +datum=NAD83"))
+#PRCPmax
+PRCPmax.points.fd<- SpatialPointsDataFrame(coords = coords, data = data.frame(PRCPmax), proj4string  = crs("+proj=longlat +datum=NAD83"))
+#PRCPmin
+PRCPmin.points.fd<- SpatialPointsDataFrame(coords = coords, data = data.frame(PRCPmin), proj4string  = crs("+proj=longlat +datum=NAD83"))
+
+
+#reproject to crs of other layers
+Dprcp.points.fd <- spTransform(Dprcp.points.fd, crs(gages.mmack))
+PRCPmax.points.fd <- spTransform(PRCPmax.points.fd, crs(gages.mmack))
+PRCPmin.points.fd <- spTransform(PRCPmin.points.fd, crs(gages.mmack))
+
+
+##calculate thiessen polygons around each station
+#polygons themselves
+Dprcp.thiessen <- voronoi(Dprcp.points.fd, ext = extent(wbd.mmack))
+PRCPmax.thiessen <- voronoi(PRCPmax.points.fd, ext = extent(wbd.mmack))
+PRCPmin.thiessen <- voronoi(PRCPmin.points.fd, ext = extent(wbd.mmack))
+
+
+
+##super rough plots of stream gages within temp thiessen polygons
+plot(wbd.mmack); points(gages.comp); lines(Dprcp.thiessen) 
+
+
+##spatially join polygons to points
+#convert to sf objects for spatial joins
+Dprcp.thiessen.sf <- st_as_sf(Dprcp.thiessen)
+PRCPmax.thiessen.sf <- st_as_sf(PRCPmax.thiessen)
+PRCPmin.thiessen.sf <- st_as_sf(PRCPmin.thiessen)
+gages.comp.sf <- st_as_sf(gages.comp)
+
+#join polygon precip differences to points
+Dprcp.join<- st_join(gages.comp.sf, left = F, Dprcp.thiessen.sf[,])
+PRCPmax.join<- st_join(gages.comp.sf, left = F, PRCPmax.thiessen.sf[,])
+PRCPmin.join<- st_join(gages.comp.sf, left = F, PRCPmin.thiessen.sf[,])
+
+#convert back to spatial data frame
+Dprcp_Dfl.pts <- as_Spatial(Dprcp.join)
+PRCPmax_Dfl.pts <- as_Spatial(PRCPmax.join)
+PRCPmin_Dfl.pts <- as_Spatial(PRCPmin.join)
+
+#remove X from before year values left in by join operation
+colnames(Dprcp_Dfl.pts@data)[grep("X2", colnames(Dprcp_Dfl.pts@data))] <-years
+colnames(PRCPmax_Dfl.pts@data)[grep("X2", colnames(PRCPmax_Dfl.pts@data))] <-years
+colnames(PRCPmin_Dfl.pts@data)[grep("X2", colnames(PRCPmin_Dfl.pts@data))] <-years
+
+
+
+#extract attribute table with just ids and precip vals
+dat.Dprcp_Dfl <- Dprcp_Dfl.pts@data[,-(2:14)]
+dat.PRCPmax_Dfl <- PRCPmax_Dfl.pts@data[,-(2:14)]
+dat.PRCPmin_Dfl <- PRCPmin_Dfl.pts@data[,-(2:14)]
+
+
+##write outputs to files for future use, commented out but left for posterity
+write.table(dat.Dprcp_Dfl, "Gen_Data/calced_vars/Dprcp_Dfl.txt")
+write.table(dat.PRCPmax_Dfl, "Gen_Data/calced_vars/PRCPmax_Dfl.txt")
+write.table(dat.PRCPmin_Dfl, "Gen_Data/calced_vars/PRCPmin.txt")
+```
