@@ -11,7 +11,10 @@ List of models or aspects of the project currently being worked on
 List of models or aspects of the project intended for future work. Not necessarily ordered
 
 ## DataManipDFL.rmd
-Read in data for stream gages, calculate and extract relevant variables, export to files in data folder. Discusses choice of variables calculated
+Read in data for stream gages, calculate and extract relevant variables aggregated on a monthly scale, export to files in data folder. Discusses choice of variables calculated
+
+## DataManipDFLseasonal.rmd
+As for DataManipDFL.rmd but aggregated seasonally
 
 ## DataManipPRCP.rmd 
 Read in data for weather stations, calculate and extract relevant variables, export files to data folder. Discussed choice of variables calculated
