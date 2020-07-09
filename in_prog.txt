@@ -3,12 +3,14 @@
 ## Precip based linear mixed models
 	-using precip data associated with stream gages via spatial join
 	-linear mixed models of streamflow variablity 
-	-on hold due to lack of data support for random affects models
 
-## Non hierarchal models based on single stream gage
+## Non hierarchal models based on single stream gage and/or year
 	-reduce scale to attempt to better understand process model
-	-will eliminate issues with vast differences between gages
+	
+## Heteroskedastic models accounting for differences in variability between gages and/or years
+	-random effects based
+	-spatially explicit?
 
-## models using a gamma data model
+## Mdels using a gamma data model
 	-all the benefits of a truncated normal (well most of them) maybe with less issues?
 	
