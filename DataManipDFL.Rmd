@@ -1,0 +1,144 @@
+---
+title: "Stream Gage Data Manipulation"
+author: "Matt Thacker"
+date: "7/1/2020"
+output: html_document
+---
+
+
+Lets begin by reading in our stream gage data. The shapefiles referenced are in order: the full GagesII dataset provided by the USGS, a subset of that dataset to the Merrimack basin hydrographic unit as defined by the USGS's watershed boundary dataset, and a subset of the northeast region for the watershed boundary dataset. 
+
+```{r}
+#spatial data stuff
+library(rgdal)
+library(raster)
+#data table management
+library(dplyr)
+
+#entire gagesII shapefile
+gagesII<- shapefile("Gen_Data/gagesII/gagesII_9322_sept30_2011.shp")
+
+#merrimack basin subset
+gages.mmack <- shapefile("Gen_Data/Merrimack_Basin/gagesII_mmack_singlepart.shp")
+
+#Watershed boundary dataset
+wbd_hu6 <- shapefile("Gen_Data/WBD_01_HU2_Shape/WBDHU6.shp")
+
+#convert watershed boundary dataset from geographic coords. to proj. coords shared with gagesII
+wbd_hu6<- spTransform(wbd_hu6, crs(gagesII))
+
+#clip watershed boundary dataset to just merrimack
+wbd.mmack <- wbd_hu6[which(wbd_hu6@data$Name == "Merrimack"),]
+
+
+#subset only gages with complete record from study area
+gages.comp <- gages.mmack[which(gages.mmack@data$ACTIVE09 == "yes" & gages.mmack@data$FLYRS1990 == 20),]
+
+#extract attribute table from clipped shapefile
+dat.mmack <- gages.comp@data
+
+#subset clipped shapefile to only active stations from 1990-2010
+subs.mmack <- dat.mmack[which(dat.mmack$ACTIVE09 == "yes" & dat.mmack$FLYRS1990 == 20),]
+
+#export relevant station ID to textfile to facilate download from USGS data portal, commented out but left in for posterity
+#write.table(subs.mmack$STAID, "mmack_ids.txt", sep = ",", row.names = F, quote = F)
+
+#read in station data
+usgs <- read.table("Gen_Data/USGS_Stream_Data/usgs_stream_gages_1990_2010_mmack.txt")
+
+#add correct variable names
+colnames(usgs) <- c("agency_cd", "site_no", "parameter_cd", "ts_id", "year_nu", "month_nu", "mean_va")
+
+#filter data a bit
+#remove incomplete yer 1990
+usgs<- usgs %>% filter(!grepl("1990", year_nu))
+
+#remove the 1990s to allow for better precip data coverage
+usgs_2k <- usgs %>% filter(!grepl("199", year_nu))
+
+```
+
+
+
+
+Now lets calculate the variables of interest. To begin with, Ive chosen to look at annual variability within the flow of the stream as that is something likely to be related to the dam removal information I'm interested in exploring. I've tried multiple ways to represent that variability. First, dividing the highest total monthly flow by the lowest total monthly flow in each year is represented by $\delta_{fl}$. Second, the annual variance of the monthly flow totals is represented by $\sigma^2_{fl}$.
+
+```{r}
+#work with list outputs
+library(rlist)
+
+#generate vector of unique station ids
+ids <- unique(usgs$site_no)
+
+#each station has seperate data frame now
+stations <- list()
+for (i in 1:length(ids)){
+  stations[[i]] <- data.frame(usgs[which(usgs$site_no == ids[i]),])
+}
+
+#apply solution to the same problen
+stationSEP <- function(x){   #function to do what is in the for loop, x is a single value used for indexing within unique IDs list
+  out <- data.frame(usgs[which(usgs$site_no == ids[x]),])
+  return(out)
+}
+
+#vector to apply stationSEP over
+itt.station <- 1:length(ids)
+
+#create list of individual station data frames
+stations<- lapply(itt.station, stationSEP)
+
+
+#create final data matrix of annual variability for each gage
+
+#generate vector of unique years
+years <- unique(usgs$year_nu)
+
+#vector to apply gage.agg over
+itt.agg <- 1:length(years)
+
+
+#function to extract d.fl values for each gage and year from a given station table, x is a value used for unique year index and n is the index in "stations" of given station table
+gage.monthly <- function(x,n){
+  temp <- data.frame(stations[[n]][which(stations[[n]]$year_nu == years[x]), "mean_va"])
+  dfl <- max(temp)/min(temp)
+  sig2 <- var(temp)
+  out<- c(dfl,sig2)
+  names(out) <- c("DFL", "sig2")
+  return(out)
+}
+
+#apply gage.monthly over each station table, y is index for n in gage.monthlys
+rows.monthly<- function (y){
+  dfl.vec <- sapply(itt.agg,gage.monthly, n=itt.station[y])
+  return(dfl.vec) #vector of dfl for each year at a given gage
+}
+
+#create list of calculated vectors for each gage
+dat.mmack <- lapply(itt.station, rows.monthly)
+
+##organize outputs
+#pull dfl values from list for each gage
+dfl.extract <- function(x){
+  x[grep("DFL", rownames(x)),]
+}
+
+dfl.mmack <-list.rbind(lapply(dat.mmack, dfl.extract))
+colnames(dfl.mmack) <- years
+rownames(dfl.mmack) <- ids
+
+
+#pull sig2 vals
+sig2.extract <- function(x){
+  x[grep("sig2", rownames(x)),]
+}
+sig2.mmack <-list.rbind(lapply(dat.mmack, sig2.extract))
+colnames(sig2.mmack) <- years
+rownames(sig2.mmack) <- ids
+
+##write outputs to files for future use, commented out but left for posterity
+write.table(dfl.mmack, "Gen_Data/calced_vars/dfl_mmack.txt")
+write.table(sig2.mmack, "Gen_Data/calced_vars/sig2_mmack.txt")
+
+```
+
