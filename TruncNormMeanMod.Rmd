@@ -175,7 +175,7 @@ RET.dic <- dic.samples(RET.model, n.iter = 5000)
 
 #plotting
 RET.ggs <- ggs(RET.burn)
-ggmcmc(jags.ggs, plot = c("density", "traceplot", "running", "crosscorrelation"), "autocorrelation")
+ggmcmc(jags.ggs, plot = c("density", "traceplot", "running", "crosscorrelation", "autocorrelation"))
 
 ```
 
