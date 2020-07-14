@@ -1,5 +1,10 @@
 # List of active streamflow projects
 
+##Models fit using Stan to address degeneracy and identifiability issues
+	-single random effect statistically identical to fitting group level means
+	-interval estimates useful as sum of mu and alpha but specific params non-identifiable
+	-Hamiltoninan MCMC diagnostics and large library of visualization tools and case studies make Stan ideal
+
 ## Precip based linear mixed models
 	-using precip data associated with stream gages via spatial join
 	-linear mixed models of streamflow variablity 
